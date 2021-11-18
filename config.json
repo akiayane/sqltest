@@ -1,5 +1,5 @@
 {
-  "dsn":"root:@tcp(localhost:3306)/saktankz?parseTime=true",
+  "dsn":"root:@tcp(localhost:3306)/sqltest?parseTime=true",
   "MaxOpenConns":25,
   "MaxIdleConns":25,
   "MaxIdleTime":"15m"

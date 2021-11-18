@@ -6,46 +6,48 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"os"
 	"reflect"
+	"strings"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 )
 
 type User struct {
-	Id int
-	Name string
-	Surname string
+	Id       int
+	Name     string
+	Surname  string
 	Password string
-	Email string
+	Email    string
 }
 
-type Product struct{
-	Id int
-	Name string
-	Count int
+type Product struct {
+	Id          int
+	Name        string
+	Count       int
 	Description string
 }
 
 type Testpack struct {
-	users User
+	users    User
 	products Product
 }
 
 type Config struct {
-	Dsn string
+	Dsn          string
 	MaxOpenConns int
 	MaxIdleConns int
-	MaxIdleTime string
+	MaxIdleTime  string
 }
 
 type application struct {
-	db *sql.DB
+	db       *sql.DB
 	testpack interface{}
 }
 
-func NewSQLTest(config string, testpack interface{}) application{
+func NewSQLTest(config string, testpack interface{}) application {
 
 	conf, err := os.Open(config)
 	if err != nil {
@@ -66,23 +68,23 @@ func NewSQLTest(config string, testpack interface{}) application{
 	}
 
 	application := application{
-		db: db,
+		db:       db,
 		testpack: testpack,
 	}
 
 	return application
 }
 
-func(app application) Iterate(){
+func (app application) Iterate() {
 	tablenames := []string{}
 
 	val := reflect.ValueOf(app.testpack).Elem()
-	for i:=0; i<val.NumField();i++{
+	for i := 0; i < val.NumField(); i++ {
 		tablenames = append(tablenames, val.Type().Field(i).Name)
 	}
 	testpack_reflection := reflect.ValueOf(app.testpack)
 
-	for i, v := range tablenames{
+	for i, v := range tablenames {
 		current_tablename := v
 		var fieldnames []string
 		var data []interface{}
@@ -90,34 +92,88 @@ func(app application) Iterate(){
 		//getting required variables
 		nest := reflect.Indirect(testpack_reflection).FieldByIndex([]int{i})
 
-		for i:=0; i<nest.NumField();i++{
+		for i := 0; i < nest.NumField(); i++ {
 			fieldnames = append(fieldnames, nest.Type().Field(i).Name)
 		}
 
-		for _, v := range fieldnames{
+		for _, v := range fieldnames {
 			current_field := nest.FieldByName(v)
 			ty := current_field.Type().String()
-			fmt.Println(ty)
-			if ty =="int"{
+			if ty == "int" {
 				current_field := nest.FieldByName(v)
 				data = append(data, int(current_field.Int()))
-			} else if ty=="string"{
+			} else if ty == "string" {
 				current_field := nest.FieldByName(v)
 				data = append(data, current_field.String())
 			}
 		}
 
 		fmt.Println(current_tablename)
-		fmt.Println(fieldnames)
-		fmt.Println(data)
+		/*fmt.Println(fieldnames)
+		fmt.Println(data)*/
 		//-----------------------------------------------------------------------------
+
+		var fields string
+		var values string
+
+		for _, s := range fieldnames {
+			fields += s + ","
+		}
+		for _, s := range data {
+			str := fmt.Sprintf("%v", s)
+			values += "'" + str + "',"
+		}
+
+		fields = strings.ToLower(strings.TrimSuffix(fields, ","))
+		values = strings.ToLower(strings.TrimSuffix(values, ","))
+
+		fmt.Println(fields)
+		fmt.Println(values)
+
+		stmt := "INSERT INTO " + current_tablename + " (" + fields + ") VALUES(" + values + ");"
+		_, err := app.db.Exec(stmt)
+		if err != nil {
+			log.Printf("Unable to INSERT: %v\n", err)
+		}
+
+		var where string
+
+		for i, s := range fieldnames {
+			str := fmt.Sprintf("%v", data[i])
+			where += s + "='" + str + "' AND "
+		}
+
+		where = strings.ToLower(strings.TrimRight(where, " AND "))
+
+		stmt = "SELECT " + fields + " from " + current_tablename + " WHERE " + where + ";"
+		rows, err := app.db.Query(stmt)
+		if err != nil {
+			log.Printf("Unable to SELECT: %v\n", err)
+		}
+
+		defer rows.Close()
+
+		if !rows.Next() {
+			fmt.Println("no such data in table " + current_tablename)
+		}
+
+		stmt = "DELETE FROM " + current_tablename + " WHERE + " + where + ";"
+		ct, err := app.db.Exec(stmt)
+		if err != nil {
+			log.Printf("Unable to DELETE: %v\n", err)
+		}
+
+		if temp, _ := ct.RowsAffected(); temp == 0 {
+			// Work with Error
+			log.Printf("no affected rows")
+		}
 	}
 }
 
 func main() {
 
 	testpack := &Testpack{
-		users:    User{
+		users: User{
 			Id:       2,
 			Name:     "Gallardo",
 			Surname:  "Migelyan",
@@ -134,37 +190,7 @@ func main() {
 
 	application := NewSQLTest("./config.json", testpack)
 	application.Iterate()
-	/*
-	conf, err := os.Open("./config.json")
-	if err != nil {
-		fmt.Println(err)
-	}
-	defer conf.Close()
-
-	var config Config
-	byteValue, _ := ioutil.ReadAll(conf)
-	err = json.Unmarshal(byteValue, &config)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-
-	user := &User{
-		Id:       2,
-		Name:     "Gallardo",
-		Surname:  "Migelyan",
-		Password: "alibeksmom",
-		Email:    "gala@gmail.com",
-	}
-	val := reflect.ValueOf(user).Elem()
-	fields := []string{}
-	for i:=0; i<val.NumField();i++{
-		fields = append(fields, val.Type().Field(i).Name)
-	}
-	fmt.Println(fields)
-	fmt.Println(user)*/
 }
-
 
 func openDB(cfg Config) (*sql.DB, error) {
 	db, err := sql.Open("mysql", cfg.Dsn)
@@ -190,4 +216,3 @@ func openDB(cfg Config) (*sql.DB, error) {
 
 	return db, nil
 }
-
