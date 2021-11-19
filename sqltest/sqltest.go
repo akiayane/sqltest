@@ -1,9 +1,10 @@
-package main
+package sqltest
 
 import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -11,29 +12,7 @@ import (
 	"reflect"
 	"strings"
 	"time"
-
-	_ "github.com/go-sql-driver/mysql"
 )
-
-type User struct {
-	Id       int
-	Name     string
-	Surname  string
-	Password string
-	Email    string
-}
-
-type Product struct {
-	Id          int
-	Name        string
-	Count       int
-	Description string
-}
-
-type Testpack struct {
-	users    User
-	products Product
-}
 
 type Config struct {
 	Dsn          string
@@ -75,7 +54,7 @@ func NewSQLTest(config string, testpack interface{}) application {
 	return application
 }
 
-func (app application) Iterate() {
+func (app application) MainSQLTest() {
 	tablenames := []string{}
 
 	val := reflect.ValueOf(app.testpack).Elem()
@@ -108,10 +87,12 @@ func (app application) Iterate() {
 			}
 		}
 
-		fmt.Println(current_tablename)
+		//fmt.Println(current_tablename)
 		/*fmt.Println(fieldnames)
 		fmt.Println(data)*/
 		//-----------------------------------------------------------------------------
+
+		errs := make(map[string]error)
 
 		var fields string
 		var values string
@@ -127,13 +108,18 @@ func (app application) Iterate() {
 		fields = strings.ToLower(strings.TrimSuffix(fields, ","))
 		values = strings.ToLower(strings.TrimSuffix(values, ","))
 
-		fmt.Println(fields)
-		fmt.Println(values)
+		//fmt.Println(fields)
+		//fmt.Println(values)
 
 		stmt := "INSERT INTO " + current_tablename + " (" + fields + ") VALUES(" + values + ");"
 		_, err := app.db.Exec(stmt)
 		if err != nil {
 			log.Printf("Unable to INSERT: %v\n", err)
+			errs["Unable to INSERT: "] = err
+		} else {
+			log.Printf("Successful INSERT to table %v\n", current_tablename)
+			log.Printf("Query: %v\n", stmt)
+
 		}
 
 		var where string
@@ -149,47 +135,55 @@ func (app application) Iterate() {
 		rows, err := app.db.Query(stmt)
 		if err != nil {
 			log.Printf("Unable to SELECT: %v\n", err)
+			errs["Unable to SELECT: "] = err
+		} else {
+			log.Printf("Successful SELECT from table %v\n", current_tablename)
+			log.Printf("Query: %v\n", stmt)
 		}
 
-		defer rows.Close()
+		defer func(rows *sql.Rows) {
+			if rows != nil {
+				err := rows.Close()
+				if err != nil {
 
-		if !rows.Next() {
-			fmt.Println("no such data in table " + current_tablename)
+				}
+			}
+		}(rows)
+
+		if rows != nil {
+			if !rows.Next() {
+				fmt.Println("no such data in table " + current_tablename)
+			}
 		}
 
-		stmt = "DELETE FROM " + current_tablename + " WHERE + " + where + ";"
+		stmt = "DELETE FROM " + current_tablename + " WHERE " + where + ";"
 		ct, err := app.db.Exec(stmt)
 		if err != nil {
 			log.Printf("Unable to DELETE: %v\n", err)
+			errs["Unable to DELETE: "] = err
+		} else {
+			log.Printf("Successful DELETE from table %v\n", current_tablename)
+			log.Printf("Query: %v\n", stmt)
 		}
 
-		if temp, _ := ct.RowsAffected(); temp == 0 {
-			// Work with Error
-			log.Printf("no affected rows")
+		if ct != nil {
+			if temp, _ := ct.RowsAffected(); temp == 0 {
+				// Work with Error
+				log.Printf("no affected rows")
+				err = errors.New("no affected rows")
+				errs["Unable to DELETE: "] = err
+			}
+		}
+
+		if len(errs) == 0 {
+			log.Printf("No errors in table: %v\n", current_tablename)
+		} else {
+			log.Printf("Errors in table: %v\n", current_tablename)
+			for _, e := range errs {
+				log.Printf("%v\n", e)
+			}
 		}
 	}
-}
-
-func main() {
-
-	testpack := &Testpack{
-		users: User{
-			Id:       2,
-			Name:     "Gallardo",
-			Surname:  "Migelyan",
-			Password: "alibeksmom",
-			Email:    "gala@gmail.com",
-		},
-		products: Product{
-			Id:          13,
-			Name:        "T-Shirt",
-			Count:       7,
-			Description: "Blue T-Shirt",
-		},
-	}
-
-	application := NewSQLTest("./config.json", testpack)
-	application.Iterate()
 }
 
 func openDB(cfg Config) (*sql.DB, error) {
